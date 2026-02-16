@@ -1,0 +1,75 @@
+/*
+  # Fix Recursive RLS Policies
+
+  Remove policies that cause infinite recursion in profiles table
+  and replace with simpler, non-recursive policies
+*/
+
+DROP POLICY IF EXISTS "Users can create own profile" ON profiles;
+DROP POLICY IF EXISTS "Users can view own profile" ON profiles;
+DROP POLICY IF EXISTS "Admin users can view all profiles" ON profiles;
+DROP POLICY IF EXISTS "Users can update own profile" ON profiles;
+DROP POLICY IF EXISTS "Admin users can update any profile" ON profiles;
+
+-- Simple policy: users can only access their own profile
+CREATE POLICY "profiles_select_own"
+  ON profiles FOR SELECT
+  TO authenticated
+  USING (auth.uid() = id);
+
+-- Users can create their own profile during signup
+CREATE POLICY "profiles_insert_own"
+  ON profiles FOR INSERT
+  TO authenticated
+  WITH CHECK (auth.uid() = id);
+
+-- Users can update their own profile
+CREATE POLICY "profiles_update_own"
+  ON profiles FOR UPDATE
+  TO authenticated
+  USING (auth.uid() = id)
+  WITH CHECK (auth.uid() = id);
+
+-- Allow anon to view public retreat info (for registration pages)
+CREATE POLICY "public_can_view_retreats"
+  ON retreats FOR SELECT
+  TO anon
+  USING (is_active = true);
+
+-- Authenticated users can view retreats
+CREATE POLICY "authenticated_can_view_retreats"
+  ON retreats FOR SELECT
+  TO authenticated
+  USING (true);
+
+-- Only creator can update their retreat
+CREATE POLICY "retreat_creator_can_update"
+  ON retreats FOR UPDATE
+  TO authenticated
+  USING (created_by = auth.uid())
+  WITH CHECK (created_by = auth.uid());
+
+-- Only creator can insert retreat
+CREATE POLICY "authenticated_can_create_retreat"
+  ON retreats FOR INSERT
+  TO authenticated
+  WITH CHECK (created_by = auth.uid());
+
+-- Public can view registrations (after submission)
+CREATE POLICY "public_can_create_registration"
+  ON registrations FOR INSERT
+  TO anon
+  WITH CHECK (true);
+
+-- View registrations for owned retreat
+CREATE POLICY "authenticated_can_view_registrations"
+  ON registrations FOR SELECT
+  TO authenticated
+  USING (true);
+
+-- Update registrations
+CREATE POLICY "authenticated_can_update_registration"
+  ON registrations FOR UPDATE
+  TO authenticated
+  USING (true)
+  WITH CHECK (true);

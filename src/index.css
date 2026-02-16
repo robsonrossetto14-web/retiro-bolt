@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-surface-950 text-slate-100 antialiased;
+  }
+}
+
+@layer components {
+  .app-bg {
+    background-image:
+      linear-gradient(rgba(18, 12, 8, 0.62), rgba(18, 12, 8, 0.62)),
+      url('./assets/app-background.png');
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+}
