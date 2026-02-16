@@ -160,7 +160,7 @@ export default function PublicRegistration() {
       if (error) throw error;
 
       const retreatDates = formatRetreatDates(retreat!);
-      void sendEmailNotification({
+      const notification = await sendEmailNotification({
         action: 'registration_confirmation',
         to: formData.email,
         participantName: formData.full_name,
@@ -170,6 +170,13 @@ export default function PublicRegistration() {
         location: retreat!.location,
         instagramHandle: retreat!.instagram_handle,
       });
+
+      if (!notification.emailSent) {
+        alert(
+          'Inscrição confirmada, mas o e-mail automático falhou. ' +
+            'Confira se o e-mail foi digitado corretamente e tente novamente em instantes.'
+        );
+      }
 
       setSubmitted(true);
     } catch (error) {
