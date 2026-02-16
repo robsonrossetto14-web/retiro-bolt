@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Shield, Sword } from 'lucide-react';
+import { Sword } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { isSupabaseConfigured } from '../lib/supabase';
+import logoHomensDeFe from '../assets/logo-homens-de-fe.png';
 
 export default function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -11,6 +12,10 @@ export default function Auth() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
+  const env = (import.meta as ImportMeta & { env: Record<string, string | undefined> }).env;
+  const logoSrc = env.VITE_SUPABASE_URL
+    ? `${env.VITE_SUPABASE_URL}/storage/v1/object/public/email-assets/logo.png`
+    : logoHomensDeFe;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,7 +52,11 @@ export default function Auth() {
             <div className="absolute top-2 right-2">
               <Sword className="w-8 h-8 text-accent-300 transform rotate-45" />
             </div>
-            <Shield className="w-16 h-16 text-accent-300 mx-auto mb-2" />
+            <img
+              src={logoSrc}
+              alt="Logo Homens de Fe"
+              className="h-24 w-auto object-contain mx-auto mb-2 drop-shadow-[0_2px_6px_rgba(0,0,0,0.45)]"
+            />
             <h1 className="text-3xl font-bold text-slate-100 tracking-wider" style={{ fontFamily: 'serif' }}>
               RETIROS HOMENS DE FÉ
             </h1>
