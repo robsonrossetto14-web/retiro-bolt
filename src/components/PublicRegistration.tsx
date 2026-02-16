@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Shield, Sword, CheckCircle, Instagram } from 'lucide-react';
 import { supabase, Retreat } from '../lib/supabase';
-import { sendEmailNotification } from '../lib/notifications';
+import { NotificationResult, sendEmailNotification } from '../lib/notifications';
 import { useParams } from './Router';
 import logoHomensDeFe from '../assets/logo-homens-de-fe.png';
 
@@ -10,6 +10,9 @@ export default function PublicRegistration() {
   const [retreat, setRetreat] = useState<Retreat | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitted, setSubmitted] = useState(false);
+  const [submittedEmail, setSubmittedEmail] = useState<string>('');
+  const [emailNotification, setEmailNotification] = useState<NotificationResult | null>(null);
+  const [resendingEmail, setResendingEmail] = useState(false);
   const [formData, setFormData] = useState({
     full_name: '',
     phone: '',
@@ -61,6 +64,8 @@ export default function PublicRegistration() {
         alert('E-mail parece digitado errado. Você quis dizer ".com"?');
         return;
       }
+
+      setSubmittedEmail(normalizedEmail);
 
       const basePayload = {
         retreat_id: retreat!.id,
@@ -177,6 +182,8 @@ export default function PublicRegistration() {
         instagramHandle: retreat!.instagram_handle,
       });
 
+      setEmailNotification(notification);
+
       if (!notification.emailSent) {
         // Keep registration flow smooth for the participant.
         // Delivery can still happen asynchronously depending on provider behavior.
@@ -205,6 +212,36 @@ export default function PublicRegistration() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const resendEmail = async () => {
+    if (!retreat || !submittedEmail) return;
+    setResendingEmail(true);
+
+    try {
+      const retreatDates = formatRetreatDates(retreat);
+      const notification = await sendEmailNotification({
+        action: 'registration_confirmation',
+        to: submittedEmail,
+        participantName: formData.full_name,
+        retreatName: retreat.name,
+        retreatDate: retreatDates.start,
+        retreatEndDate: retreatDates.end,
+        location: retreat.location,
+        instagramHandle: retreat.instagram_handle,
+      });
+      setEmailNotification(notification);
+
+      if (notification.emailSent) {
+        alert('E-mail reenviado. Verifique também spam e promoções.');
+      } else {
+        alert(
+          `Não foi possível confirmar o envio do e-mail agora.\n\nMotivo: ${notification.error ?? 'desconhecido'}`
+        );
+      }
+    } finally {
+      setResendingEmail(false);
     }
   };
 
@@ -263,6 +300,38 @@ export default function PublicRegistration() {
             <p className="text-amber-300 mb-4">
                 Em breve você receberá mais informações sobre o pagamento via Sicoob/Sipag.
             </p>
+
+            <div className="mt-4 bg-stone-900/50 border border-amber-700 rounded-lg p-4 text-left">
+              <p className="text-amber-200 font-bold mb-2" style={{ fontFamily: 'serif' }}>
+                E-mail
+              </p>
+              {emailNotification?.emailSent ? (
+                <p className="text-green-300 text-sm">
+                  Enviado para <span className="font-bold">{submittedEmail}</span>. Verifique spam/promoções.
+                </p>
+              ) : (
+                <>
+                  <p className="text-amber-300 text-sm">
+                    Não conseguimos confirmar o envio para <span className="font-bold">{submittedEmail}</span>.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={resendEmail}
+                    disabled={resendingEmail}
+                    className="mt-3 inline-flex items-center justify-center w-full bg-stone-800 text-amber-100 font-bold py-2 px-4 rounded border border-amber-700 hover:bg-stone-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                    style={{ fontFamily: 'serif' }}
+                  >
+                    {resendingEmail ? 'REENVIANDO...' : 'REENVIAR E-MAIL'}
+                  </button>
+                  {emailNotification?.error && (
+                    <p className="text-amber-400 text-xs mt-2 break-words">
+                      Motivo: {emailNotification.error}
+                    </p>
+                  )}
+                </>
+              )}
+            </div>
+
             {retreat.instagram_handle && (
               <div className="flex items-center justify-center space-x-2 text-amber-200">
                 <Instagram className="w-5 h-5" />

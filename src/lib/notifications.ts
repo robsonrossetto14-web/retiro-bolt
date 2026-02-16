@@ -14,9 +14,11 @@ type EmailPayload = {
   whatsappGroupLink?: string;
 };
 
-type NotificationResult = {
+export type NotificationResult = {
   ok: boolean;
   emailSent: boolean;
+  error?: string;
+  details?: string;
   whatsapp: {
     attempted: boolean;
     sent: boolean;
@@ -30,6 +32,7 @@ const env = (import.meta as ImportMeta & { env: Record<string, string | undefine
 const defaultResult: NotificationResult = {
   ok: false,
   emailSent: false,
+  error: 'unknown_error',
   whatsapp: {
     attempted: false,
     sent: false,
@@ -42,7 +45,11 @@ export async function sendEmailNotification(payload: EmailPayload): Promise<Noti
   const supabaseAnonKey = env.VITE_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
-    return { ...defaultResult, whatsapp: { ...defaultResult.whatsapp, reason: 'missing_supabase_config' } };
+    return {
+      ...defaultResult,
+      error: 'missing_supabase_config',
+      whatsapp: { ...defaultResult.whatsapp, reason: 'missing_supabase_config' },
+    };
   }
 
   try {
@@ -57,13 +64,35 @@ export async function sendEmailNotification(payload: EmailPayload): Promise<Noti
     });
 
     if (!response.ok) {
-      return defaultResult;
+      let raw = '';
+      try {
+        raw = await response.text();
+      } catch {
+        raw = '';
+      }
+
+      try {
+        const parsed = JSON.parse(raw) as { error?: string; details?: string };
+        return {
+          ...defaultResult,
+          error: parsed.error ?? `http_${response.status}`,
+          details: parsed.details ?? raw,
+        };
+      } catch {
+        return {
+          ...defaultResult,
+          error: `http_${response.status}`,
+          details: raw,
+        };
+      }
     }
 
-    const body = await response.json() as Partial<NotificationResult>;
+    const body = (await response.json()) as Partial<NotificationResult>;
     return {
       ok: body.ok === true,
       emailSent: body.emailSent === true,
+      error: body.error,
+      details: body.details,
       whatsapp: {
         attempted: body.whatsapp?.attempted === true,
         sent: body.whatsapp?.sent === true,
@@ -73,7 +102,7 @@ export async function sendEmailNotification(payload: EmailPayload): Promise<Noti
     };
   } catch (error) {
     console.error('Error calling send-email function:', error);
-    return defaultResult;
+    return { ...defaultResult, error: 'network_error' };
   }
 }
 
