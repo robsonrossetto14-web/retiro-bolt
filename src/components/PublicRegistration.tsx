@@ -56,11 +56,17 @@ export default function PublicRegistration() {
     setLoading(true);
 
     try {
+      const normalizedEmail = formData.email.trim().toLowerCase();
+      if (normalizedEmail.endsWith('.con')) {
+        alert('E-mail parece digitado errado. Você quis dizer ".com"?');
+        return;
+      }
+
       const basePayload = {
         retreat_id: retreat!.id,
         full_name: formData.full_name,
         phone: formData.phone,
-        email: formData.email,
+        email: normalizedEmail,
         parish: formData.parish,
         shirt_size: formData.shirt_size,
         emergency_contact_name: formData.emergency_contact_name,
@@ -162,7 +168,7 @@ export default function PublicRegistration() {
       const retreatDates = formatRetreatDates(retreat!);
       const notification = await sendEmailNotification({
         action: 'registration_confirmation',
-        to: formData.email,
+        to: normalizedEmail,
         participantName: formData.full_name,
         retreatName: retreat!.name,
         retreatDate: retreatDates.start,
@@ -172,10 +178,9 @@ export default function PublicRegistration() {
       });
 
       if (!notification.emailSent) {
-        alert(
-          'Inscrição confirmada, mas o e-mail automático falhou. ' +
-            'Confira se o e-mail foi digitado corretamente e tente novamente em instantes.'
-        );
+        // Keep registration flow smooth for the participant.
+        // Delivery can still happen asynchronously depending on provider behavior.
+        console.warn('Registration saved but email was not confirmed as sent.', notification);
       }
 
       setSubmitted(true);

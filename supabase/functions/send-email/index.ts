@@ -30,6 +30,11 @@ type WhatsAppTemplateConfig = {
   languageCode?: string | null;
 };
 
+type EmailProviderAck = {
+  success: boolean;
+  details?: string;
+};
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -321,6 +326,36 @@ function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+function parseEmailProviderAck(rawBody: string): EmailProviderAck {
+  const body = rawBody.trim();
+  if (!body) {
+    return { success: true };
+  }
+
+  try {
+    const parsed = JSON.parse(body) as Record<string, unknown>;
+
+    if (parsed.ok === false || parsed.success === false || typeof parsed.error === 'string') {
+      return {
+        success: false,
+        details:
+          typeof parsed.error === 'string'
+            ? parsed.error
+            : typeof parsed.message === 'string'
+              ? parsed.message
+              : body,
+      };
+    }
+
+    return { success: true };
+  } catch {
+    if (/error|falha|failed|invalid|unauthorized/i.test(body)) {
+      return { success: false, details: body };
+    }
+    return { success: true };
+  }
+}
+
 function buildEmail(payload: RequestPayload, logoUrl?: string | null): { subject: string; html: string } {
   const dateInfo = payload.retreatEndDate && payload.retreatEndDate !== payload.retreatDate
     ? `${payload.retreatDate} até ${payload.retreatEndDate}`
@@ -446,12 +481,27 @@ serve(async (req) => {
       }),
     });
 
+    const providerBody = await googleResponse.text();
+
     if (!googleResponse.ok) {
-      const errorBody = await googleResponse.text();
-      return new Response(JSON.stringify({ error: 'Failed to send email', details: errorBody }), {
+      return new Response(JSON.stringify({ error: 'Failed to send email', details: providerBody }), {
         status: 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+
+    const providerAck = parseEmailProviderAck(providerBody);
+    if (!providerAck.success) {
+      return new Response(
+        JSON.stringify({
+          error: 'Email provider rejected delivery',
+          details: providerAck.details ?? providerBody,
+        }),
+        {
+          status: 502,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        },
+      );
     }
 
     const whatsapp = await sendWhatsAppMessage(
