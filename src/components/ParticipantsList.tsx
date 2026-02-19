@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Download, Send, CheckCircle, AlertCircle, Trash2, Search, Copy, Users, Clock3, DollarSign } from 'lucide-react';
+import ExcelJS from 'exceljs';
 import { supabase, Retreat, Registration } from '../lib/supabase';
 import { sendEmailNotification } from '../lib/notifications';
 
@@ -257,81 +258,101 @@ export default function ParticipantsList({ retreat, onBack }: ParticipantsListPr
     return value;
   };
 
-  const deduplicateByName = (list: Registration[]): Registration[] => {
-    const seen = new Set<string>();
-    return list.filter((reg) => {
+  const statusPriority = (s: Registration['payment_status']) =>
+    s === 'paid' ? 3 : s === 'link_sent' ? 2 : 1;
+
+  const deduplicateSmart = (list: Registration[]): Registration[] => {
+    const byName = new Map<string, Registration[]>();
+    for (const reg of list) {
       const key = (reg.full_name ?? '').trim().toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+      if (!key) continue;
+      const arr = byName.get(key) ?? [];
+      arr.push(reg);
+      byName.set(key, arr);
+    }
+    const result: Registration[] = [];
+    for (const arr of byName.values()) {
+      const best = arr.sort((a, b) => {
+        const pa = statusPriority(a.payment_status);
+        const pb = statusPriority(b.payment_status);
+        if (pa !== pb) return pb - pa;
+        return new Date(b.registered_at).getTime() - new Date(a.registered_at).getTime();
+      })[0];
+      result.push(best);
+    }
+    return result;
   };
 
   const sortByName = (list: Registration[]): Registration[] =>
     [...list].sort((a, b) => (a.full_name ?? '').localeCompare(b.full_name ?? '', 'pt-BR'));
 
-  const exportToExcel = () => {
-    const csvEscape = (value: unknown) => {
-      const stringValue = String(value ?? '');
-      return `"${stringValue.replace(/"/g, '""')}"`;
+  const headers = [
+    'Nome',
+    'Email',
+    'Telefone',
+    'Data de Nascimento',
+    'Paróquia',
+    'Possui Problema de Saúde',
+    'Detalhes do Problema de Saúde',
+    'Tamanho da Camiseta',
+    'Contato de Emergência',
+    'Telefone de Emergência',
+    'Status de Pagamento',
+    'Data de Cadastro',
+  ];
+
+  const statusLabel = (status: Registration['payment_status']) =>
+    status === 'paid' ? 'Pago' : status === 'link_sent' ? 'Link Enviado' : 'Pendente';
+
+  const buildRowData = (reg: Registration) => [
+    reg.full_name,
+    reg.email,
+    formatPhoneExport(reg.phone),
+    reg.date_of_birth ? new Date(reg.date_of_birth).toLocaleDateString('pt-BR') : '',
+    reg.parish,
+    hasHealthIssue(reg) ? 'Sim' : 'Não',
+    healthIssueDetails(reg) || '',
+    reg.shirt_size,
+    reg.emergency_contact_name,
+    formatPhoneExport(reg.emergency_contact_phone),
+    statusLabel(reg.payment_status),
+    new Date(reg.registered_at).toLocaleString('pt-BR'),
+  ];
+
+  const applyArial = (cell: ExcelJS.Cell) => {
+    cell.font = { name: 'Arial', size: 11 };
+  };
+
+  const exportToExcel = async () => {
+    const deduped = deduplicateSmart(registrations);
+    const paid = sortByName(deduped.filter((r) => r.payment_status === 'paid'));
+    const linkSent = sortByName(deduped.filter((r) => r.payment_status === 'link_sent'));
+    const pending = sortByName(deduped.filter((r) => r.payment_status === 'pending'));
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = 'Retiro Bolt';
+
+    const addSheet = (name: string, list: Registration[]) => {
+      const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
+      const headerRow = sheet.addRow(headers);
+      headerRow.eachCell((cell) => { cell.font = { name: 'Arial', size: 11, bold: true }; });
+      for (const reg of list) {
+        const row = sheet.addRow(buildRowData(reg));
+        row.eachCell((cell) => applyArial(cell));
+      }
+      sheet.columns.forEach((col) => { col.width = 18; });
     };
 
-    const statusLabel = (status: Registration['payment_status']) =>
-      status === 'paid' ? 'Pago' : status === 'link_sent' ? 'Link enviado' : 'Somente inscrição';
+    addSheet('Pago', paid);
+    addSheet('Link Enviado', linkSent);
+    addSheet('Pendente', pending);
 
-    const headers = [
-      'Categoria',
-      'Nome',
-      'Email',
-      'Telefone',
-      'Data de Nascimento',
-      'Paróquia',
-      'Possui Problema de Saúde',
-      'Detalhes do Problema de Saúde',
-      'Tamanho da Camiseta',
-      'Contato de Emergência',
-      'Telefone de Emergência',
-      'Status de Pagamento',
-      'Data de Cadastro',
-    ];
-
-    const buildRows = (list: Registration[], category: string) =>
-      list.map((reg) => [
-        category,
-        reg.full_name,
-        reg.email,
-        formatPhoneExport(reg.phone),
-        reg.date_of_birth ? new Date(reg.date_of_birth).toLocaleDateString('pt-BR') : '',
-        reg.parish,
-        hasHealthIssue(reg) ? 'Sim' : 'Não',
-        healthIssueDetails(reg) || '',
-        reg.shirt_size,
-        reg.emergency_contact_name,
-        formatPhoneExport(reg.emergency_contact_phone),
-        statusLabel(reg.payment_status),
-        new Date(reg.registered_at).toLocaleString('pt-BR'),
-      ]);
-
-    const paid = sortByName(deduplicateByName(registrations.filter((r) => r.payment_status === 'paid')));
-    const link = sortByName(deduplicateByName(registrations.filter((r) => r.payment_status === 'link_sent')));
-    const pending = sortByName(deduplicateByName(registrations.filter((r) => r.payment_status === 'pending')));
-
-    const paidRows = buildRows(paid, 'Pagos');
-    const linkRows = buildRows(link, 'Receberam link');
-    const pendingRows = buildRows(pending, 'Somente inscrição');
-
-    const rows = [...paidRows, ...linkRows, ...pendingRows];
-
-    const csv = [
-      headers.join(';'),
-      ...rows.map((row) => row.map((cell) => csvEscape(cell)).join(';')),
-    ].join('\n');
-
-    const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const linkEl = document.createElement('a');
     linkEl.href = url;
-    linkEl.download = `inscritos_${retreat.name}_${Date.now()}.csv`;
+    linkEl.download = `inscritos_${retreat.name}_${Date.now()}.xlsx`;
     linkEl.style.visibility = 'hidden';
     document.body.appendChild(linkEl);
     linkEl.click();
@@ -340,12 +361,9 @@ export default function ParticipantsList({ retreat, onBack }: ParticipantsListPr
   };
 
   const exportToMarkdown = () => {
-    const statusLabel = (status: Registration['payment_status']) =>
-      status === 'paid' ? 'Pago' : status === 'link_sent' ? 'Link enviado' : 'Somente inscrição';
-
     const escapeMdCell = (v: unknown) => String(v ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
-    const headers = [
+    const mdHeaders = [
       'Categoria',
       'Nome',
       'Email',
@@ -378,18 +396,19 @@ export default function ParticipantsList({ retreat, onBack }: ParticipantsListPr
         new Date(reg.registered_at).toLocaleString('pt-BR'),
       ]);
 
-    const paid = sortByName(deduplicateByName(registrations.filter((r) => r.payment_status === 'paid')));
-    const link = sortByName(deduplicateByName(registrations.filter((r) => r.payment_status === 'link_sent')));
-    const pending = sortByName(deduplicateByName(registrations.filter((r) => r.payment_status === 'pending')));
+    const deduped = deduplicateSmart(registrations);
+    const paid = sortByName(deduped.filter((r) => r.payment_status === 'paid'));
+    const link = sortByName(deduped.filter((r) => r.payment_status === 'link_sent'));
+    const pending = sortByName(deduped.filter((r) => r.payment_status === 'pending'));
 
     const rows = [
-      ...buildRows(paid, 'Pagos'),
-      ...buildRows(link, 'Receberam link'),
-      ...buildRows(pending, 'Somente inscrição'),
+      ...buildRows(paid, 'Pago'),
+      ...buildRows(link, 'Link Enviado'),
+      ...buildRows(pending, 'Pendente'),
     ];
 
-    const headerRow = '| ' + headers.join(' | ') + ' |';
-    const separator = '|' + headers.map(() => '---').join('|') + '|';
+    const headerRow = '| ' + mdHeaders.join(' | ') + ' |';
+    const separator = '|' + mdHeaders.map(() => '---').join('|') + '|';
     const bodyRows = rows.map((row) => '| ' + row.join(' | ') + ' |');
     const md = ['# Inscritos – ' + retreat.name, '', headerRow, separator, ...bodyRows].join('\n');
 
@@ -561,12 +580,12 @@ export default function ParticipantsList({ retreat, onBack }: ParticipantsListPr
             </div>
             <div className="flex gap-2">
               <button
-                onClick={exportToExcel}
+                onClick={() => void exportToExcel()}
                 className="inline-flex items-center gap-2 rounded-lg border border-green-600 bg-green-700 px-4 py-2 text-sm font-bold text-green-100 hover:bg-green-600 transition-all"
                 style={{ fontFamily: 'serif' }}
               >
                 <Download className="w-4 h-4" />
-                CSV
+                Excel
               </button>
               <button
                 onClick={exportToMarkdown}
