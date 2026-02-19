@@ -340,7 +340,21 @@ export default function ParticipantsList({ retreat, onBack }: ParticipantsListPr
         const row = sheet.addRow(buildRowData(reg));
         row.eachCell((cell) => applyArial(cell));
       }
-      sheet.columns.forEach((col) => { col.width = 18; });
+      const colCount = headers.length;
+      const maxWidths = new Array<number>(colCount).fill(10);
+      sheet.eachRow((row) => {
+        row.eachCell((cell, colNumber) => {
+          const idx = (colNumber as number) - 1;
+          if (idx >= 0 && idx < colCount) {
+            const len = String(cell.value ?? '').length;
+            maxWidths[idx] = Math.max(maxWidths[idx], Math.min(len + 2, 60));
+          }
+        });
+      });
+      headers.forEach((h, i) => { maxWidths[i] = Math.max(maxWidths[i], h.length + 2); });
+      for (let i = 0; i < colCount; i++) {
+        sheet.getColumn(i + 1).width = maxWidths[i] ?? 18;
+      }
     };
 
     addSheet('Pago', paid);
@@ -353,70 +367,6 @@ export default function ParticipantsList({ retreat, onBack }: ParticipantsListPr
     const linkEl = document.createElement('a');
     linkEl.href = url;
     linkEl.download = `inscritos_${retreat.name}_${Date.now()}.xlsx`;
-    linkEl.style.visibility = 'hidden';
-    document.body.appendChild(linkEl);
-    linkEl.click();
-    document.body.removeChild(linkEl);
-    URL.revokeObjectURL(url);
-  };
-
-  const exportToMarkdown = () => {
-    const escapeMdCell = (v: unknown) => String(v ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
-
-    const mdHeaders = [
-      'Categoria',
-      'Nome',
-      'Email',
-      'Telefone',
-      'Data Nasc.',
-      'Paróquia',
-      'Problema Saúde',
-      'Detalhes Saúde',
-      'Camiseta',
-      'Contato Emerg.',
-      'Tel. Emerg.',
-      'Status',
-      'Cadastro',
-    ];
-
-    const buildRows = (list: Registration[], category: string) =>
-      list.map((reg) => [
-        escapeMdCell(category),
-        escapeMdCell(reg.full_name),
-        escapeMdCell(reg.email),
-        escapeMdCell(formatPhoneExport(reg.phone)),
-        reg.date_of_birth ? new Date(reg.date_of_birth).toLocaleDateString('pt-BR') : '',
-        escapeMdCell(reg.parish),
-        hasHealthIssue(reg) ? 'Sim' : 'Não',
-        escapeMdCell(healthIssueDetails(reg)),
-        escapeMdCell(reg.shirt_size),
-        escapeMdCell(reg.emergency_contact_name),
-        escapeMdCell(formatPhoneExport(reg.emergency_contact_phone)),
-        escapeMdCell(statusLabel(reg.payment_status)),
-        new Date(reg.registered_at).toLocaleString('pt-BR'),
-      ]);
-
-    const deduped = deduplicateSmart(registrations);
-    const paid = sortByName(deduped.filter((r) => r.payment_status === 'paid'));
-    const link = sortByName(deduped.filter((r) => r.payment_status === 'link_sent'));
-    const pending = sortByName(deduped.filter((r) => r.payment_status === 'pending'));
-
-    const rows = [
-      ...buildRows(paid, 'Pago'),
-      ...buildRows(link, 'Link Enviado'),
-      ...buildRows(pending, 'Pendente'),
-    ];
-
-    const headerRow = '| ' + mdHeaders.join(' | ') + ' |';
-    const separator = '|' + mdHeaders.map(() => '---').join('|') + '|';
-    const bodyRows = rows.map((row) => '| ' + row.join(' | ') + ' |');
-    const md = ['# Inscritos – ' + retreat.name, '', headerRow, separator, ...bodyRows].join('\n');
-
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const linkEl = document.createElement('a');
-    linkEl.href = url;
-    linkEl.download = `inscritos_${retreat.name}_${Date.now()}.md`;
     linkEl.style.visibility = 'hidden';
     document.body.appendChild(linkEl);
     linkEl.click();
@@ -578,24 +528,14 @@ export default function ParticipantsList({ retreat, onBack }: ParticipantsListPr
                 className="w-full pl-9 pr-3 py-2 bg-stone-800 border border-amber-700 rounded text-amber-100 focus:outline-none focus:border-amber-500"
               />
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={() => void exportToExcel()}
-                className="inline-flex items-center gap-2 rounded-lg border border-green-600 bg-green-700 px-4 py-2 text-sm font-bold text-green-100 hover:bg-green-600 transition-all"
-                style={{ fontFamily: 'serif' }}
-              >
-                <Download className="w-4 h-4" />
-                Excel
-              </button>
-              <button
-                onClick={exportToMarkdown}
-                className="inline-flex items-center gap-2 rounded-lg border border-amber-600 bg-amber-700 px-4 py-2 text-sm font-bold text-amber-100 hover:bg-amber-600 transition-all"
-                style={{ fontFamily: 'serif' }}
-              >
-                <Download className="w-4 h-4" />
-                Markdown
-              </button>
-            </div>
+            <button
+              onClick={() => void exportToExcel()}
+              className="inline-flex items-center gap-2 rounded-lg border border-green-600 bg-green-700 px-4 py-2 text-sm font-bold text-green-100 hover:bg-green-600 transition-all"
+              style={{ fontFamily: 'serif' }}
+            >
+              <Download className="w-4 h-4" />
+              Exportar
+            </button>
           </div>
 
           {loading ? (
