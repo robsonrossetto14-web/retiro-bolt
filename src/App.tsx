@@ -4,14 +4,25 @@ import { Router, useParams } from './components/Router';
 import Auth from './components/Auth';
 import AdminDashboard from './components/Admindashboard';
 import PublicRegistration from './components/PublicRegistration';
+import ApproveAccount from './components/ApproveAccount';
 
 function AppContent() {
   const { user, profile, loading } = useAuth();
   const params = useParams();
   const path = window.location.pathname;
+  const query = new URLSearchParams(window.location.search);
+  const approvalTokenFromQuery = query.get('token');
 
   if (path.startsWith('/inscricao/') && params.shareLink) {
     return <PublicRegistration />;
+  }
+
+  if (path.startsWith('/aprovar-conta/') && params.approvalToken) {
+    return <ApproveAccount token={params.approvalToken} />;
+  }
+
+  if (path === '/aprovar-conta' && approvalTokenFromQuery) {
+    return <ApproveAccount token={approvalTokenFromQuery} />;
   }
 
   if (loading) {

@@ -40,6 +40,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+function truncate(value: string, maxLength = 1800): string {
+  if (!value) return value;
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}…`;
+}
+
 function parseAllowedOrigins(raw?: string | null): string[] {
   if (!raw) return [];
   return raw
@@ -124,7 +130,7 @@ function buildWhatsAppMessage(payload: RequestPayload): string | null {
     return [
       `Paz, ${safeName}!`,
       '',
-      `As formas de pagamento via Sicoob/Sipag do retiro "${payload.retreatName}" foram enviadas para o seu e-mail.`,
+      `As formas de pagamento do retiro "${payload.retreatName}" foram enviadas para o seu e-mail.`,
       'Confira sua caixa de entrada e spam.',
       '',
       `Data: ${dateInfo}`,
@@ -326,11 +332,35 @@ function isLikelyEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-function parseEmailProviderAck(rawBody: string): EmailProviderAck {
+function parseEmailProviderAck(
+  rawBody: string,
+  meta?: { contentType?: string | null; finalUrl?: string | null },
+): EmailProviderAck {
   const body = rawBody.trim();
-  if (!body) {
-    return { success: true };
+  const contentType = meta?.contentType?.toLowerCase() ?? '';
+  const finalUrl = meta?.finalUrl ?? '';
+
+  if (!body) return { success: false, details: 'Empty provider response' };
+
+  if (
+    contentType.includes('text/html') ||
+    body.toLowerCase().startsWith('<!doctype html') ||
+    body.toLowerCase().startsWith('<html')
+  ) {
+    return {
+      success: false,
+      details: `Unexpected HTML response${finalUrl ? ` (${finalUrl})` : ''}`,
+    };
   }
+
+  if (finalUrl && /accounts\.google\.com|consent\.google\.com/i.test(finalUrl)) {
+    return {
+      success: false,
+      details: `Provider redirected to Google auth (${finalUrl})`,
+    };
+  }
+
+  if (/^ok$/i.test(body)) return { success: true };
 
   try {
     const parsed = JSON.parse(body) as Record<string, unknown>;
@@ -347,12 +377,17 @@ function parseEmailProviderAck(rawBody: string): EmailProviderAck {
       };
     }
 
-    return { success: true };
+    if (parsed.ok === true || parsed.success === true) return { success: true };
+
+    return {
+      success: false,
+      details: typeof parsed.message === 'string' ? parsed.message : body,
+    };
   } catch {
     if (/error|falha|failed|invalid|unauthorized/i.test(body)) {
       return { success: false, details: body };
     }
-    return { success: true };
+    return { success: false, details: `Unrecognized provider response: ${body}` };
   }
 }
 
@@ -369,10 +404,10 @@ function buildEmail(payload: RequestPayload, logoUrl?: string | null): { subject
 
   if (payload.action === 'payment_link') {
     return {
-      subject: `Formas de pagamento (Sicoob/Sipag) - ${payload.retreatName}`,
+      subject: `Formas de pagamento - ${payload.retreatName}`,
       html: baseTemplate(
-        'Formas de pagamento (Sicoob/Sipag) disponiveis',
-        `Ola, ${escapeHtml(payload.participantName)}! As formas de pagamento via Sicoob/Sipag foram enviadas abaixo.`,
+        'Formas de pagamento disponiveis',
+        `Ola, ${escapeHtml(payload.participantName)}! As formas de pagamento foram enviadas abaixo.`,
         details,
         paymentInstructionsHtml(payload.paymentLink),
         'Se precisar de ajuda, fale com a equipe organizadora.',
@@ -423,6 +458,49 @@ serve(async (req) => {
     });
   }
 
+  const requestOrigin = req.headers.get('origin');
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const supabaseServiceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+  const allowedOrigins = parseAllowedOrigins(Deno.env.get('EMAIL_ALLOWED_ORIGINS'));
+
+  const logAttempt = async (record: {
+    action: string;
+    to_email: string;
+    origin?: string | null;
+    http_status?: number | null;
+    provider_status?: number | null;
+    provider_ack_received?: boolean | null;
+    provider_details?: string | null;
+    error?: string | null;
+    details?: string | null;
+  }) => {
+    if (!supabaseUrl || !supabaseServiceRoleKey) return;
+    try {
+      await fetch(`${supabaseUrl}/rest/v1/email_delivery_attempts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: supabaseServiceRoleKey,
+          Authorization: `Bearer ${supabaseServiceRoleKey}`,
+          Prefer: 'return=minimal',
+        },
+        body: JSON.stringify({
+          action: record.action,
+          to_email: record.to_email,
+          origin: record.origin ?? null,
+          http_status: record.http_status ?? null,
+          provider_status: record.provider_status ?? null,
+          provider_ack_received: record.provider_ack_received ?? null,
+          provider_details: record.provider_details ? truncate(record.provider_details) : null,
+          error: record.error ? truncate(record.error, 400) : null,
+          details: record.details ? truncate(record.details) : null,
+        }),
+      });
+    } catch (e) {
+      console.warn('Failed to log email attempt', e);
+    }
+  };
+
   try {
     const googleScriptWebhookUrl = Deno.env.get('GOOGLE_SCRIPT_WEBHOOK_URL');
     const googleScriptWebhookToken = Deno.env.get('GOOGLE_SCRIPT_WEBHOOK_TOKEN');
@@ -433,17 +511,29 @@ serve(async (req) => {
     const whatsappTemplatePaymentLink = Deno.env.get('WHATSAPP_TEMPLATE_PAYMENT_LINK');
     const whatsappTemplatePaymentConfirmed = Deno.env.get('WHATSAPP_TEMPLATE_PAYMENT_CONFIRMED');
     const whatsappTemplateLanguageCode = Deno.env.get('WHATSAPP_TEMPLATE_LANGUAGE_CODE') ?? 'pt_BR';
-    const allowedOrigins = parseAllowedOrigins(Deno.env.get('EMAIL_ALLOWED_ORIGINS'));
 
     if (!googleScriptWebhookUrl) {
+      await logAttempt({
+        action: 'provider_not_configured',
+        to_email: '-',
+        origin: requestOrigin,
+        http_status: 500,
+        error: 'Email provider not configured',
+      });
       return new Response(JSON.stringify({ error: 'Email provider not configured' }), {
         status: 500,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const requestOrigin = req.headers.get('origin');
     if (!isOriginAllowed(requestOrigin, allowedOrigins)) {
+      await logAttempt({
+        action: 'blocked_origin',
+        to_email: '-',
+        origin: requestOrigin,
+        http_status: 403,
+        error: 'Origin not allowed',
+      });
       return new Response(JSON.stringify({ error: 'Origin not allowed' }), {
         status: 403,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -452,12 +542,26 @@ serve(async (req) => {
 
     const payload = await req.json() as RequestPayload;
     if (!payload?.action || !payload?.to || !payload?.participantName || !payload?.retreatName) {
+      await logAttempt({
+        action: payload?.action ?? 'invalid_payload',
+        to_email: payload?.to ?? '-',
+        origin: requestOrigin,
+        http_status: 400,
+        error: 'Invalid payload',
+      });
       return new Response(JSON.stringify({ error: 'Invalid payload' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
     if (!isLikelyEmail(payload.to)) {
+      await logAttempt({
+        action: payload.action,
+        to_email: payload.to,
+        origin: requestOrigin,
+        http_status: 400,
+        error: 'Invalid recipient email',
+      });
       return new Response(JSON.stringify({ error: 'Invalid recipient email' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -484,14 +588,39 @@ serve(async (req) => {
     const providerBody = await googleResponse.text();
 
     if (!googleResponse.ok) {
+      await logAttempt({
+        action: payload.action,
+        to_email: payload.to,
+        origin: requestOrigin,
+        http_status: 502,
+        provider_status: googleResponse.status,
+        provider_ack_received: false,
+        provider_details: providerBody,
+        error: 'Failed to send email',
+        details: providerBody,
+      });
       return new Response(JSON.stringify({ error: 'Failed to send email', details: providerBody }), {
         status: 502,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
-    const providerAck = parseEmailProviderAck(providerBody);
+    const providerAck = parseEmailProviderAck(providerBody, {
+      contentType: googleResponse.headers.get('content-type'),
+      finalUrl: googleResponse.url,
+    });
     if (!providerAck.success) {
+      await logAttempt({
+        action: payload.action,
+        to_email: payload.to,
+        origin: requestOrigin,
+        http_status: 502,
+        provider_status: googleResponse.status,
+        provider_ack_received: false,
+        provider_details: providerAck.details ?? providerBody,
+        error: 'Email provider rejected delivery',
+        details: providerAck.details ?? providerBody,
+      });
       return new Response(
         JSON.stringify({
           error: 'Email provider rejected delivery',
@@ -516,11 +645,29 @@ serve(async (req) => {
       },
     );
 
+    await logAttempt({
+      action: payload.action,
+      to_email: payload.to,
+      origin: requestOrigin,
+      http_status: 200,
+      provider_status: googleResponse.status,
+      provider_ack_received: true,
+      provider_details: providerBody,
+    });
+
     return new Response(JSON.stringify({ ok: true, emailSent: true, whatsapp }), {
       status: 200,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (error: any) {
+    await logAttempt({
+      action: 'unexpected_error',
+      to_email: '-',
+      origin: requestOrigin,
+      http_status: 500,
+      error: error?.message ?? 'Unexpected error',
+      details: typeof error?.stack === 'string' ? error.stack : null,
+    });
     return new Response(JSON.stringify({ error: error?.message ?? 'Unexpected error' }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

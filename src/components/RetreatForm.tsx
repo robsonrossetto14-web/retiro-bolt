@@ -13,6 +13,8 @@ const buildInitialFormData = (retreat?: Retreat | null) => ({
   name: retreat?.name ?? '',
   date: retreat?.date ? String(retreat.date).slice(0, 10) : '',
   end_date: retreat?.end_date ? String(retreat.end_date).slice(0, 10) : retreat?.date ? String(retreat.date).slice(0, 10) : '',
+  price: retreat?.price != null ? String(retreat.price) : '',
+  max_slots: retreat?.max_slots != null ? String(retreat.max_slots) : '',
   location: retreat?.location ?? '',
   address: retreat?.address ?? '',
   what_to_bring: retreat?.what_to_bring ?? '',
@@ -20,6 +22,26 @@ const buildInitialFormData = (retreat?: Retreat | null) => ({
   instagram_handle: retreat?.instagram_handle ?? '',
   shirt_sizes: retreat?.shirt_sizes ?? ['P', 'M', 'G', 'GG', 'XG'],
 });
+
+const parsePrice = (raw: string): number | null => {
+  const normalized = raw.replace(',', '.').trim();
+  if (!normalized) return null;
+  const value = Number(normalized);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error('Informe um valor valido para o retiro.');
+  }
+  return value;
+};
+
+const parseMaxSlots = (raw: string): number | null => {
+  const normalized = raw.trim();
+  if (!normalized) return null;
+  const value = Number(normalized);
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error('Informe um numero maximo de vagas valido.');
+  }
+  return value;
+};
 
 export default function RetreatForm({ onSuccess, onCancel, initialRetreat }: RetreatFormProps) {
   const { user } = useAuth();
@@ -41,10 +63,14 @@ export default function RetreatForm({ onSuccess, onCancel, initialRetreat }: Ret
       if (formData.end_date < formData.date) {
         throw new Error('A data de encerramento nao pode ser anterior a data de inicio.');
       }
+      const parsedPrice = parsePrice(formData.price);
+      const parsedMaxSlots = parseMaxSlots(formData.max_slots);
 
       const basePayload = {
         name: formData.name,
         date: formData.date,
+        price: parsedPrice,
+        max_slots: parsedMaxSlots,
         location: formData.location,
         address: formData.address,
         what_to_bring: formData.what_to_bring,
@@ -60,6 +86,8 @@ export default function RetreatForm({ onSuccess, onCancel, initialRetreat }: Ret
           name: formData.name,
           date: formData.date,
           end_date: formData.end_date,
+          price: parsedPrice,
+          max_slots: parsedMaxSlots,
           location: formData.location,
           address: formData.address,
           what_to_bring: formData.what_to_bring,
@@ -75,13 +103,21 @@ export default function RetreatForm({ onSuccess, onCancel, initialRetreat }: Ret
           .eq('id', initialRetreat.id);
 
         const updateMessage = updateError?.message?.toLowerCase() ?? '';
-        if (updateError && (updateMessage.includes('end_date') || updateMessage.includes('updated_at'))) {
+        if (
+          updateError &&
+          (updateMessage.includes('end_date') ||
+            updateMessage.includes('updated_at') ||
+            updateMessage.includes('price') ||
+            updateMessage.includes('max_slots'))
+        ) {
           const fallbackUpdate = await supabase
             .from('retreats')
             .update({
               name: formData.name,
               date: formData.date,
               end_date: formData.end_date,
+              price: parsedPrice,
+              max_slots: parsedMaxSlots,
               location: formData.location,
               address: formData.address,
               what_to_bring: formData.what_to_bring,
@@ -93,7 +129,12 @@ export default function RetreatForm({ onSuccess, onCancel, initialRetreat }: Ret
           updateError = fallbackUpdate.error;
 
           const fallbackMessage = updateError?.message?.toLowerCase() ?? '';
-          if (updateError && fallbackMessage.includes('end_date')) {
+          if (
+            updateError &&
+            (fallbackMessage.includes('end_date') ||
+              fallbackMessage.includes('price') ||
+              fallbackMessage.includes('max_slots'))
+          ) {
             const legacyFallbackUpdate = await supabase
               .from('retreats')
               .update({
@@ -129,6 +170,32 @@ export default function RetreatForm({ onSuccess, onCancel, initialRetreat }: Ret
             setError(
               'Retiro criado, mas seu banco ainda nao tem o campo de encerramento. Rode a migration de end_date.'
             );
+            onSuccess();
+            return;
+          }
+        }
+
+        if (insertError?.message?.toLowerCase().includes('price')) {
+          const fallbackResult = await supabase.from('retreats').insert({
+            ...basePayload,
+            price: undefined,
+          });
+          insertError = fallbackResult.error;
+          if (!insertError) {
+            setError('Retiro criado, mas seu banco ainda nao tem o campo de valor. Rode a migration de price.');
+            onSuccess();
+            return;
+          }
+        }
+
+        if (insertError?.message?.toLowerCase().includes('max_slots')) {
+          const fallbackResult = await supabase.from('retreats').insert({
+            ...basePayload,
+            max_slots: undefined,
+          });
+          insertError = fallbackResult.error;
+          if (!insertError) {
+            setError('Retiro criado, mas seu banco ainda nao tem o campo de vagas. Rode a migration de max_slots.');
             onSuccess();
             return;
           }
@@ -211,6 +278,36 @@ export default function RetreatForm({ onSuccess, onCancel, initialRetreat }: Ret
 
                 <div>
                   <label className="block text-amber-100 text-sm font-bold mb-2" style={{ fontFamily: 'serif' }}>
+                    Valor do Retiro (R$)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={formData.price}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                    className="w-full px-4 py-3 bg-stone-800 border-2 border-amber-700 rounded text-amber-100 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/50"
+                    placeholder="Ex: 400.00"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-amber-100 text-sm font-bold mb-2" style={{ fontFamily: 'serif' }}>
+                    Numero Maximo de Vagas
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={formData.max_slots}
+                    onChange={(e) => setFormData({ ...formData, max_slots: e.target.value })}
+                    className="w-full px-4 py-3 bg-stone-800 border-2 border-amber-700 rounded text-amber-100 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/50"
+                    placeholder="Ex: 120"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-amber-100 text-sm font-bold mb-2" style={{ fontFamily: 'serif' }}>
                     Local *
                   </label>
                   <input
@@ -250,14 +347,14 @@ export default function RetreatForm({ onSuccess, onCancel, initialRetreat }: Ret
 
                 <div className="md:col-span-2">
                   <label className="block text-amber-100 text-sm font-bold mb-2" style={{ fontFamily: 'serif' }}>
-                    Dados / Formas de pagamento (Sicoob/Sipag)
+                    Dados / Formas de pagamento
                   </label>
                   <textarea
                     value={formData.payment_instructions}
                     onChange={(e) => setFormData({ ...formData, payment_instructions: e.target.value })}
                     rows={5}
                     className="w-full px-4 py-3 bg-stone-800 border-2 border-amber-700 rounded text-amber-100 focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-500/50"
-                    placeholder="Ex: Pagamento via Sicoob/Sipag, valor, vencimento, dados do pagador e instruções."
+                    placeholder="Ex: Pagamento, valor, vencimento, dados do pagador e instruções."
                   />
                 </div>
 

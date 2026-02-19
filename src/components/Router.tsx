@@ -21,6 +21,11 @@ export function Router({ children }: { children: React.ReactNode }) {
     params.shareLink = inscricaoMatch[1];
   }
 
+  const approveAccountMatch = path.match(/^\/aprovar-conta\/(.+)$/);
+  if (approveAccountMatch) {
+    params.approvalToken = approveAccountMatch[1];
+  }
+
   return (
     <RouterContext.Provider value={{ path, params }}>
       {children}

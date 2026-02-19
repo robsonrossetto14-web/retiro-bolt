@@ -1,0 +1,9 @@
+[functions.send-email]
+verify_jwt = false
+
+[functions.request-account-approval]
+verify_jwt = false
+
+[functions.approve-account]
+verify_jwt = false
+

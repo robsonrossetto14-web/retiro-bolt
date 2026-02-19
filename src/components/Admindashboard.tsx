@@ -52,14 +52,37 @@ export default function AdminDashboard() {
     if (!retreatToDelete || isDeletingRetreat) return;
     setIsDeletingRetreat(true);
     try {
-      const { error } = await supabase.from('retreats').delete().eq('id', retreatToDelete.id);
+      const retreatId = retreatToDelete.id;
+      const retreatName = retreatToDelete.name;
+
+      const { error } = await supabase.from('retreats').delete().eq('id', retreatId);
       if (error) throw error;
-      setRetreats((currentRetreats) => currentRetreats.filter((item) => item.id !== retreatToDelete.id));
+
+      // Some RLS configurations can return no error even when no row is deleted.
+      // Double-check existence to avoid "it disappeared then came back" behavior.
+      const verifyResult = await supabase
+        .from('retreats')
+        .select('*')
+        .eq('id', retreatId)
+        .maybeSingle();
+
+      if (verifyResult.error) throw verifyResult.error;
+      if (verifyResult.data) {
+        throw new Error(
+          `Nao foi possivel apagar o retiro "${retreatName}". Verifique as politicas de permissao (RLS) para DELETE em retreats.`
+        );
+      }
+
+      setRetreats((currentRetreats) => currentRetreats.filter((item) => item.id !== retreatId));
       setRetreatToDelete(null);
       alert('Retiro apagado com sucesso.');
     } catch (error) {
       console.error('Error deleting retreat:', error);
-      alert('Erro ao apagar retiro. Tente novamente.');
+      const message =
+        error && typeof error === 'object' && 'message' in error && typeof error.message === 'string'
+          ? error.message
+          : 'Erro ao apagar retiro. Tente novamente.';
+      alert(message);
     } finally {
       setIsDeletingRetreat(false);
     }
@@ -183,37 +206,37 @@ export default function AdminDashboard() {
                       <p className="text-xs text-amber-400 mt-1">{retreat.address}</p>
                       <p className="text-xs text-amber-500 mt-2">Última atualização: {formatUpdatedAt(retreat)}</p>
                     </div>
-                    <div className="flex items-center space-x-2 pt-4 border-t border-amber-700">
+                    <div className="grid grid-cols-[42px_1fr_1fr_42px] gap-2 pt-4 border-t border-amber-700">
                       <button
                         onClick={() => {
                           setEditingRetreat(retreat);
                           setShowForm(true);
                         }}
-                        className="flex items-center justify-center space-x-2 bg-surface-800 hover:bg-surface-700 text-slate-100 px-3 py-2 rounded border border-slate-600 transition-all text-sm font-bold"
+                        className="h-11 flex items-center justify-center bg-stone-800 hover:bg-stone-700 text-amber-100 rounded border border-amber-700 transition-all"
                         title="Editar retiro"
                       >
-                        <Pencil className="w-4 h-4" />
+                        <Pencil className="w-4 h-4 shrink-0" />
                       </button>
                       <button
                         onClick={() => copyShareLink(retreat.share_link)}
-                        className="flex-1 flex items-center justify-center space-x-2 bg-stone-700 hover:bg-stone-600 text-amber-200 px-3 py-2 rounded border border-amber-700 transition-all text-sm"
+                        className="h-11 flex items-center justify-center gap-2 bg-stone-700 hover:bg-stone-600 text-amber-200 px-3 rounded border border-amber-700 transition-all text-sm"
                       >
-                        <LinkIcon className="w-4 h-4" />
-                        <span>Copiar Link</span>
+                        <LinkIcon className="w-4 h-4 shrink-0" />
+                        <span className="leading-none">Copiar Link</span>
                       </button>
                       <button
                         onClick={() => setSelectedRetreat(retreat)}
-                        className="flex-1 flex items-center justify-center space-x-2 bg-amber-700 hover:bg-amber-600 text-amber-100 px-3 py-2 rounded border border-amber-600 transition-all text-sm font-bold"
+                        className="h-11 flex items-center justify-center gap-2 bg-amber-700 hover:bg-amber-600 text-amber-100 px-3 rounded border border-amber-600 transition-all text-sm font-bold"
                       >
-                        <Users className="w-4 h-4" />
-                        <span>Inscritos</span>
+                        <Users className="w-4 h-4 shrink-0" />
+                        <span className="leading-none">Inscritos</span>
                       </button>
                       <button
                         onClick={() => setRetreatToDelete(retreat)}
-                        className="flex items-center justify-center space-x-2 bg-red-800 hover:bg-red-700 text-red-100 px-3 py-2 rounded border border-red-700 transition-all text-sm font-bold"
+                        className="h-11 flex items-center justify-center bg-red-800 hover:bg-red-700 text-red-100 rounded border border-red-700 transition-all"
                         title="Apagar retiro"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-4 h-4 shrink-0" />
                       </button>
                     </div>
                   </div>

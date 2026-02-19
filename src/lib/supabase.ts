@@ -5,6 +5,8 @@ export type Retreat = {
   name: string;
   date: string;
   end_date: string | null;
+  price: number | null;
+  max_slots: number | null;
   location: string;
   address: string;
   what_to_bring: string | null;
@@ -35,6 +37,8 @@ export type Registration = {
   payment_status: 'pending' | 'link_sent' | 'paid';
   payment_link: string | null;
   whatsapp_group_link: string | null;
+  terms_accepted: boolean;
+  terms_accepted_at: string | null;
   registered_at: string;
   payment_confirmed_at: string | null;
 };
@@ -44,6 +48,8 @@ export type Profile = {
   email: string;
   full_name: string | null;
   role: 'admin' | 'participant';
+  approval_status: 'pending' | 'approved' | 'rejected';
+  approved_at: string | null;
   created_at: string;
 };
 
@@ -210,6 +216,8 @@ function createSupabaseAdapter(): SupabaseLike {
           email: defaultUser.email,
           full_name: 'Administrador Local',
           role: 'admin',
+          approval_status: 'approved',
+          approved_at: new Date().toISOString(),
           created_at: new Date().toISOString(),
         },
       ]);
@@ -223,6 +231,8 @@ function createSupabaseAdapter(): SupabaseLike {
           name: 'Retiro Local de Exemplo',
           date: new Date().toISOString(),
           end_date: new Date().toISOString(),
+          price: 400,
+          max_slots: 120,
           location: 'Centro de Formacao',
           address: 'Rua Exemplo, 100 - Cidade',
           what_to_bring: 'Biblia, caderno e garrafa de agua',
@@ -292,6 +302,18 @@ function createSupabaseAdapter(): SupabaseLike {
             name: String(item.name ?? 'Retiro sem nome'),
             date: String(item.date ?? new Date().toISOString()),
             end_date: (item.end_date ?? null) as string | null,
+            price:
+              item.price == null
+                ? null
+                : Number.isFinite(Number(item.price))
+                  ? Number(item.price)
+                  : null,
+            max_slots:
+              item.max_slots == null
+                ? null
+                : Number.isInteger(Number(item.max_slots)) && Number(item.max_slots) > 0
+                  ? Number(item.max_slots)
+                  : null,
             location: String(item.location ?? ''),
             address: String(item.address ?? ''),
             what_to_bring: (item.what_to_bring ?? null) as string | null,
@@ -369,6 +391,8 @@ function createSupabaseAdapter(): SupabaseLike {
             payment_status: item.payment_status ?? 'pending',
             payment_link: (item.payment_link ?? null) as string | null,
             whatsapp_group_link: (item.whatsapp_group_link ?? null) as string | null,
+            terms_accepted: item.terms_accepted == null ? false : Boolean(item.terms_accepted),
+            terms_accepted_at: (item.terms_accepted_at ?? null) as string | null,
             registered_at: new Date().toISOString(),
             payment_confirmed_at: (item.payment_confirmed_at ?? null) as string | null,
           }));
@@ -413,6 +437,8 @@ function createSupabaseAdapter(): SupabaseLike {
           email: String(item.email ?? ''),
           full_name: (item.full_name ?? null) as string | null,
           role: item.role ?? 'admin',
+          approval_status: (item.approval_status as Profile['approval_status'] | undefined) ?? 'approved',
+          approved_at: (item.approved_at ?? null) as string | null,
           created_at: new Date().toISOString(),
         }));
         write<Profile[]>(LOCAL_PROFILES_KEY, [...profiles, ...inserted]);
