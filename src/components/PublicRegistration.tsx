@@ -69,6 +69,12 @@ const formatPhoneInput = (raw: string): string => {
   return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
 };
 
+const normalizePhoneForSubmit = (raw: string): string => {
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.startsWith('55') ? digits : `55${digits}`;
+};
+
 export default function PublicRegistration() {
   const { shareLink } = useParams();
   const [retreat, setRetreat] = useState<Retreat | null>(null);
@@ -170,12 +176,12 @@ export default function PublicRegistration() {
       const basePayload = {
         retreat_id: retreat!.id,
         full_name: formData.full_name,
-        phone: formData.phone,
+        phone: normalizePhoneForSubmit(formData.phone),
         email: normalizedEmail,
         parish: formData.parish,
         shirt_size: formData.shirt_size,
         emergency_contact_name: formData.emergency_contact_name,
-        emergency_contact_phone: formData.emergency_contact_phone,
+        emergency_contact_phone: normalizePhoneForSubmit(formData.emergency_contact_phone),
         terms_accepted: true,
         terms_accepted_at: new Date().toISOString(),
       };
@@ -278,7 +284,7 @@ export default function PublicRegistration() {
       const payload: RegistrationEmailPayload = {
         action: 'registration_confirmation',
         to: normalizedEmail,
-        phone: formData.phone,
+        phone: normalizePhoneForSubmit(formData.phone),
         participantName: formData.full_name,
         retreatName: retreat!.name,
         retreatDate: retreatDates.start,

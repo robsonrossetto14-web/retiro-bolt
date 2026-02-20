@@ -332,7 +332,9 @@ export default function ParticipantsList({ retreat, onBack }: ParticipantsListPr
     const workbook = new ExcelJS.Workbook();
     workbook.creator = 'Retiro Bolt';
 
-    const addSheet = (name: string, list: Registration[]) => {
+    const shirtOrder = ['PP', 'P', 'M', 'G', 'GG', 'XG', 'XXG', 'Não informado'];
+
+    const addParticipantSheet = (name: string, list: Registration[]) => {
       const sheet = workbook.addWorksheet(name, { views: [{ state: 'frozen', ySplit: 1 }] });
       const headerRow = sheet.addRow(headers);
       headerRow.eachCell((cell) => { cell.font = { name: 'Arial', size: 11, bold: true }; });
@@ -357,9 +359,56 @@ export default function ParticipantsList({ retreat, onBack }: ParticipantsListPr
       }
     };
 
-    addSheet('Pago', paid);
-    addSheet('Link Enviado', linkSent);
-    addSheet('Pendente', pending);
+    const addShirtSummarySheet = () => {
+      const counts = new Map<string, number>();
+      for (const reg of deduped) {
+        const size = (reg.shirt_size ?? '').trim() || 'Não informado';
+        counts.set(size, (counts.get(size) ?? 0) + 1);
+      }
+      const sortedSizes = [...counts.keys()].sort((a, b) => {
+        const ia = shirtOrder.indexOf(a);
+        const ib = shirtOrder.indexOf(b);
+        if (ia >= 0 && ib >= 0) return ia - ib;
+        if (ia >= 0) return -1;
+        if (ib >= 0) return 1;
+        return a.localeCompare(b);
+      });
+      const sheet = workbook.addWorksheet('Resumo Camisetas', { views: [{ state: 'frozen', ySplit: 1 }] });
+      const shirtHeaders = ['Tamanho', 'Total'];
+      const headerRow = sheet.addRow(shirtHeaders);
+      headerRow.eachCell((cell) => { cell.font = { name: 'Arial', size: 11, bold: true }; });
+      let totalGeral = 0;
+      for (const size of sortedSizes) {
+        const qty = counts.get(size) ?? 0;
+        totalGeral += qty;
+        const row = sheet.addRow([size, qty]);
+        row.eachCell((cell) => applyArial(cell));
+      }
+      const totalRow = sheet.addRow(['Total Geral', totalGeral]);
+      totalRow.eachCell((cell) => {
+        cell.font = { name: 'Arial', size: 11, bold: true };
+      });
+      const colCount = shirtHeaders.length;
+      const maxWidths = new Array<number>(colCount).fill(10);
+      sheet.eachRow((row) => {
+        row.eachCell((cell, colNumber) => {
+          const idx = (colNumber as number) - 1;
+          if (idx >= 0 && idx < colCount) {
+            const len = String(cell.value ?? '').length;
+            maxWidths[idx] = Math.max(maxWidths[idx], Math.min(len + 2, 60));
+          }
+        });
+      });
+      shirtHeaders.forEach((h, i) => { maxWidths[i] = Math.max(maxWidths[i], h.length + 2); });
+      for (let i = 0; i < colCount; i++) {
+        sheet.getColumn(i + 1).width = maxWidths[i] ?? 18;
+      }
+    };
+
+    addParticipantSheet('Pagos', paid);
+    addParticipantSheet('Link Enviado', linkSent);
+    addParticipantSheet('Pendentes', pending);
+    addShirtSummarySheet();
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
